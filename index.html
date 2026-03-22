@@ -735,16 +735,11 @@
   </div>
 </header>
 
-<!-- Google Sheets Banner -->
-<div class="sheets-banner">
-  <label>📊 Google Sheets URL:</label>
-  <input type="text" id="sheetsUrl" placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv" />
-  <button class="sheets-btn" id="sheetsLoadBtn" onclick="loadFromSheets()">Юклаш</button>
-  <span class="sheets-status" id="sheetsStatus"></span>
-  <div class="sheets-help">
-    Sheets'да: <strong>File → Share → Publish to web → Sheet1 → CSV → Publish</strong> → ҳосил бўлган URL'ни юқорига киритинг.
-    URL браузер сессиясида сақланади.
-  </div>
+<!-- Google Sheets hidden inputs (background sync) -->
+<div style="display:none">
+  <input type="text" id="sheetsUrl" />
+  <button id="sheetsLoadBtn" onclick="loadFromSheets()"></button>
+  <span id="sheetsStatus"></span>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
