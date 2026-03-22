@@ -631,10 +631,81 @@
   ::-webkit-scrollbar-thumb { background: var(--border); }
   ::-webkit-scrollbar-thumb:hover { background: var(--gold-dim); }
 
+  /* SHEETS BANNER */
+  .sheets-banner {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0.6rem 3rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    font-size: 0.72rem;
+    flex-wrap: wrap;
+  }
+
+  .sheets-banner label {
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .sheets-banner input {
+    flex: 1;
+    min-width: 200px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    padding: 0.35rem 0.7rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .sheets-banner input:focus { border-color: var(--gold-dim); }
+  .sheets-banner input::placeholder { color: var(--text-dim); }
+
+  .sheets-btn {
+    background: none;
+    border: 1px solid var(--gold-dim);
+    color: var(--gold);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .sheets-btn:hover { background: rgba(201,168,76,0.1); }
+  .sheets-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .sheets-status {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+
+  .sheets-status.ok { color: var(--green); border-color: var(--green); }
+  .sheets-status.err { color: var(--red); border-color: var(--red); }
+  .sheets-status.loading { color: var(--gold); border-color: var(--gold-dim); }
+
+  .sheets-help {
+    font-size: 0.62rem;
+    color: var(--text-dim);
+    width: 100%;
+    padding-top: 0.1rem;
+  }
+
+  .sheets-help a { color: var(--gold-dim); text-decoration: none; }
+  .sheets-help a:hover { color: var(--gold); }
+
   @media (max-width: 768px) {
     .main { grid-template-columns: 1fr; }
     aside { display: none; }
     header { padding: 1rem; }
+    .sheets-banner { padding: 0.6rem 1rem; }
     .content { padding: 1rem; }
     .analytics { grid-template-columns: 1fr; }
     .detail-panel { width: 100%; }
@@ -663,6 +734,18 @@
     </button>
   </div>
 </header>
+
+<!-- Google Sheets Banner -->
+<div class="sheets-banner">
+  <label>📊 Google Sheets URL:</label>
+  <input type="text" id="sheetsUrl" placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv" />
+  <button class="sheets-btn" id="sheetsLoadBtn" onclick="loadFromSheets()">Юклаш</button>
+  <span class="sheets-status" id="sheetsStatus"></span>
+  <div class="sheets-help">
+    Sheets'да: <strong>File → Share → Publish to web → Sheet1 → CSV → Publish</strong> → ҳосил бўлган URL'ни юқорига киритинг.
+    URL браузер сессиясида сақланади.
+  </div>
+</div>
 
 <div class="stats-bar" id="statsBar"></div>
 
@@ -1404,15 +1487,185 @@ function matchesSearch(d, q) {
   return variants.some(v => fieldsWithVariants.some(f => f.includes(v)));
 }
 
+// GOOGLE SHEETS INTEGRATION
+const CORS_PROXY = 'https://corsproxy.io/?';
+
+async function loadFromSheets() {
+  const urlInput = document.getElementById('sheetsUrl');
+  const btn = document.getElementById('sheetsLoadBtn');
+  const status = document.getElementById('sheetsStatus');
+  const rawUrl = urlInput.value.trim();
+
+  if (!rawUrl) {
+    setStatus('URL киритинг', 'err'); return;
+  }
+
+  // Accept both published CSV URL and regular spreadsheet URL
+  let csvUrl = rawUrl;
+  // If it's a regular spreadsheet URL, convert to CSV export
+  const idMatch = rawUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (idMatch && !rawUrl.includes('output=csv')) {
+    const gidMatch = rawUrl.match(/gid=(\d+)/);
+    const gid = gidMatch ? gidMatch[1] : '0';
+    csvUrl = `https://docs.google.com/spreadsheets/d/${idMatch[1]}/pub?gid=${gid}&single=true&output=csv`;
+  }
+
+  btn.disabled = true;
+  setStatus('Юкланмоқда...', 'loading');
+
+  try {
+    // Try direct fetch first (works if CORS headers present)
+    let text = null;
+    try {
+      const resp = await fetch(csvUrl);
+      if (resp.ok) text = await resp.text();
+    } catch(e) {}
+
+    // Fallback: CORS proxy
+    if (!text) {
+      const resp = await fetch(CORS_PROXY + encodeURIComponent(csvUrl));
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      text = await resp.text();
+    }
+
+    const rows = parseCSVText(text);
+    if (rows.length < 2) throw new Error('Маълумот топилмади');
+
+    // Parse header row to find columns
+    const headers = rows[0].map(h => h.trim().toLowerCase());
+    const yilIdx = headers.findIndex(h => h.includes('yil') || h.includes('йил'));
+    const ruknIdx = headers.findIndex(h => h.includes('rukn') || h.includes('рукн'));
+    const muallifIdx = headers.findIndex(h => h.includes('muallif') || h.includes('муаллиф'));
+    const asarIdx = headers.findIndex(h => h.includes('asar') || h.includes('асар'));
+    const tarjimonIdx = headers.findIndex(h => h.includes('tarjimon') || h.includes('таржимон'));
+    const sonIdx = headers.findIndex(h => h.includes('son') || h.includes('сон'));
+
+    const newData = rows.slice(1).filter(r => r.some(c => c.trim())).map(r => {
+      const authorRaw = r[muallifIdx] || '';
+      return {
+        yil: r[yilIdx] || '',
+        rukn: r[ruknIdx] || '',
+        muallif: authorRaw,
+        asar: r[asarIdx] || '',
+        tarjimon: r[tarjimonIdx] || '',
+        son: r[sonIdx] || '',
+        country: extractCountry(authorRaw)
+      };
+    });
+
+    // Replace data
+    allData.length = 0;
+    newData.forEach(d => allData.push(d));
+    activeYears.clear(); activeRubrics.clear(); activeCountries.clear();
+    applyFilters();
+
+    // Save URL for session
+    try { sessionStorage.setItem('sheetsUrl', csvUrl); } catch(e) {}
+
+    setStatus(`✓ ${newData.length} та қатор юкланди`, 'ok');
+    urlInput.value = csvUrl;
+  } catch(e) {
+    setStatus('Хато: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setStatus(msg, type) {
+  const s = document.getElementById('sheetsStatus');
+  s.textContent = msg;
+  s.className = 'sheets-status ' + (type||'');
+}
+
+function parseCSVText(text) {
+  const rows = [];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const fields = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; }
+      else if (c === ',' && !inQ) { fields.push(cur); cur = ''; }
+      else cur += c;
+    }
+    fields.push(cur);
+    rows.push(fields.map(f => f.trim()));
+  }
+  return rows;
+}
+
+// Default Google Sheets CSV URL
+const DEFAULT_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR68D1-Oba2qHEYXuoF3jb3fxXpIHlGXmGo4hkQfu2gTw56FNkgIfmVYSKiB4qmsmI1M175li3VoCL7/pub?gid=507626240&single=true&output=csv';
+
+// Auto-load from Sheets on startup
+(async function initLoad() {
+  const urlInput = document.getElementById('sheetsUrl');
+  urlInput.value = DEFAULT_SHEETS_URL;
+
+  // First show local data immediately
+  buildFilters();
+  applyFilters();
+
+  // Then try to load from Sheets in background
+  setStatus('Google Sheets\'дан юкланмоқда...', 'loading');
+  try {
+    let text = null;
+    try {
+      const resp = await fetch(DEFAULT_SHEETS_URL);
+      if (resp.ok) text = await resp.text();
+    } catch(e) {}
+
+    if (!text) {
+      const CORS_PROXY = 'https://corsproxy.io/?';
+      const resp = await fetch(CORS_PROXY + encodeURIComponent(DEFAULT_SHEETS_URL));
+      if (resp.ok) text = await resp.text();
+    }
+
+    if (text) {
+      const rows = parseCSVText(text);
+      if (rows.length > 1) {
+        const headers = rows[0].map(h => h.trim().toLowerCase());
+        const yilIdx = headers.findIndex(h => h.includes('yil') || h.includes('йил'));
+        const ruknIdx = headers.findIndex(h => h.includes('rukn') || h.includes('рукн'));
+        const muallifIdx = headers.findIndex(h => h.includes('muallif') || h.includes('муаллиф'));
+        const asarIdx = headers.findIndex(h => h.includes('asar') || h.includes('асар'));
+        const tarjimonIdx = headers.findIndex(h => h.includes('tarjimon') || h.includes('таржимон'));
+        const sonIdx = headers.findIndex(h => h.includes('son') || h.includes('сон'));
+
+        const newData = rows.slice(1).filter(r => r.some(c => c.trim())).map(r => {
+          const authorRaw = r[muallifIdx] || '';
+          return {
+            yil: r[yilIdx] || '',
+            rukn: r[ruknIdx] || '',
+            muallif: authorRaw,
+            asar: r[asarIdx] || '',
+            tarjimon: r[tarjimonIdx] || '',
+            son: r[sonIdx] || '',
+            country: extractCountry(authorRaw)
+          };
+        });
+
+        allData.length = 0;
+        newData.forEach(d => allData.push(d));
+        activeYears.clear(); activeRubrics.clear(); activeCountries.clear();
+        applyFilters();
+        setStatus(`✓ ${newData.length} та қатор юкланди`, 'ok');
+      }
+    } else {
+      setStatus('Офлайн режим — маҳаллий маълумотлар', '');
+    }
+  } catch(e) {
+    setStatus('Офлайн режим — маҳаллий маълумотлар', '');
+  }
+})();
+
 // Search
 document.getElementById('searchInput').addEventListener('input', e => {
   searchQ = e.target.value.trim();
   applyFilters();
 });
-
-// Init
-buildFilters();
-applyFilters();
 </script>
 </body>
 </html>
